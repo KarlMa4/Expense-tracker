@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Expense Tracker</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 20px;
+    }
+    #myChart {
+      max-width: 400px;   /* 控制圖表大小 */
+      max-height: 400px;
+      margin: auto;
+    }
+    form {
+      margin: 20px auto;
+      max-width: 300px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    input, button {
+      padding: 8px;
+      font-size: 14px;
+    }
+    button {
+      background-color: #36a2eb;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #2b82c9;
+    }
+  </style>
+</head>
+<body>
+  <h2>消費分布圖</h2>
+
+  <!-- 新增交易表單 -->
+  <form id="transactionForm">
+    <input type="date" id="date" required>
+    <input type="number" id="amount" placeholder="金額" step="0.01" required>
+    <input type="text" id="description" placeholder="描述 (例如 Starbucks)" required>
+    <button type="submit">新增交易</button>
+  </form>
+
+  <!-- 圓餅圖 -->
+  <canvas id="myChart"></canvas>
+
+  <script>
+    let chart;
+
+    // 從後端 API 載入 summary 資料
+    async function loadData() {
+      const res = await fetch("http://127.0.0.1:8000/summary");
+      const data = await res.json();
+
+      const labels = Object.keys(data);
+      const values = Object.values(data);
+
+      if (chart) {
+        chart.destroy(); // 避免重疊
+      }
+
+      chart = new Chart(document.getElementById('myChart'), {
+        type: 'pie',
+        data: {
+          labels: labels,
+          datasets: [{
+            data: values,
+            backgroundColor: [
+              '#ff6384', '#36a2eb', '#ffcd56',
+              '#4bc0c0', '#9966ff', '#ff9f40'
+            ]
+          }]
+        }
+      });
+    }
+
+    // 表單送出 → 呼叫 FastAPI /transactions
+    document.getElementById('transactionForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const date = document.getElementById('date').value;
+      const amount = parseFloat(document.getElementById('amount').value);
+      const description = document.getElementById('description').value;
+
+      await fetch("http://127.0.0.1:8000/transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date, amount, description })
+      });
+
+      // 清空表單 & 重新載入圖表
+      e.target.reset();
+      loadData();
+    });
+
+    // 頁面載入時先顯示一次
+    loadData();
+  </script>
+</body>
+</html>

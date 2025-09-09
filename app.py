@@ -1,0 +1,113 @@
+# app.py
+
+# Before run change venv!!
+# Remember to move to 記帳app
+# terminal type: venv\Scripts\activate
+# Then run: uvicorn app:app --reload
+
+from fastapi import FastAPI
+from pydantic import BaseModel
+import sqlite3
+import joblib
+from fastapi.middleware.cors import CORSMiddleware
+
+# 初始化 FastAPI
+app = FastAPI(
+    docs_url="/",       # Swagger UI 直接在 /
+    redoc_url=None,     # 可選：關掉 /redoc
+    openapi_url="/openapi.json",
+)
+
+# CORS middleware（讓前端 HTML 可以呼叫 API）
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 開發時先允許全部
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 載入 ML 模型與向量器
+clf = joblib.load("model.pkl")
+vectorizer = joblib.load("vectorizer.pkl")
+
+# 定義交易輸入資料格式
+
+
+class TransactionIn(BaseModel):
+    date: str
+    amount: float
+    description: str
+
+# 建立資料表（如果還沒建）
+
+
+def init_db():
+    conn = sqlite3.connect("expenses.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        amount REAL NOT NULL,
+        description TEXT,
+        category TEXT
+    )
+    """)
+    conn.commit()
+    conn.close()
+
+
+init_db()
+
+# 插入一筆交易
+
+
+def insert_transaction(date, amount, description, category):
+    conn = sqlite3.connect("expenses.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO transactions (date, amount, description, category) VALUES (?, ?, ?, ?)",
+        (date, amount, description, category)
+    )
+    conn.commit()
+    conn.close()
+
+# Root endpoint
+
+
+@app.get("/")
+def root():
+    return {"message": "Hello, FastAPI is working!"}
+
+# 新增交易
+
+
+@app.post("/transactions")
+def add_transaction(t: TransactionIn):
+    # ML 預測類別
+    X = vectorizer.transform([t.description])
+    category = clf.predict(X)[0]
+
+    # 存到 DB
+    insert_transaction(t.date, t.amount, t.description, category)
+
+    return {
+        "date": t.date,
+        "amount": t.amount,
+        "description": t.description,
+        "predicted_category": category
+    }
+
+# 回傳 summary (給 Chart.js 使用)
+
+
+@app.get("/summary")
+def get_summary():
+    conn = sqlite3.connect("expenses.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT category, SUM(amount) FROM transactions GROUP BY category")
+    rows = cursor.fetchall()
+    conn.close()
+    return {row[0]: row[1] for row in rows}
