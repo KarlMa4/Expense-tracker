@@ -51,12 +51,26 @@
   <!-- 圓餅圖 -->
   <canvas id="myChart"></canvas>
 
+  <h2>交易紀錄</h2>
+  <table id="transactionTable" border="1" style="margin:auto; width:80%; text-align:center;">
+    <thead>
+      <tr>
+        <th>日期</th>
+        <th>金額</th>
+        <th>描述</th>
+        <th>分類</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+
   <script>
     let chart;
-
+    const API_BASE = "http://127.0.0.1:8000";
     // 從後端 API 載入 summary 資料
     async function loadData() {
-      const res = await fetch("http://127.0.0.1:8000/summary");
+      const res = await fetch(`${API_BASE}/summary`);
       const data = await res.json();
 
       const labels = Object.keys(data);
@@ -80,6 +94,24 @@
         }
       });
     }
+    async function loadTransactions() {
+      const res = await fetch(`${API_BASE}/transactions`);
+      const rows = await res.json(); // [{date, amount, description, category}, ...]
+
+      const tbody = document.querySelector("#transactionTable tbody");
+      tbody.innerHTML = "";
+      rows.forEach(tx => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${tx.date ?? ""}</td>
+          <td>${Number(tx.amount).toFixed(2)}</td>
+          <td>${tx.description ?? ""}</td>
+          <td>${tx.category ?? ""}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+    
 
     // 表單送出 → 呼叫 FastAPI /transactions
     document.getElementById('transactionForm').addEventListener('submit', async (e) => {
@@ -97,10 +129,14 @@
       // 清空表單 & 重新載入圖表
       e.target.reset();
       loadData();
+      loadTransactions(); // 更新表格
     });
 
-    // 頁面載入時先顯示一次
-    loadData();
+    // 頁面初始化
+    (async () => {
+      await loadData();
+      await loadTransactions();
+    })();
   </script>
 </body>
 </html>

@@ -96,3 +96,20 @@ def get_summary():
     rows = cursor.fetchall()
     conn.close()
     return {row[0]: row[1] for row in rows}
+
+
+@app.get("/transactions")
+def get_transactions():
+    conn = sqlite3.connect("expenses.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT date, amount, description, category FROM transactions ORDER BY date ASC")
+    rows = cursor.fetchall()
+    conn.close()
+
+    # 格式化成 JSON
+    transactions = [
+        {"date": r[0], "amount": r[1], "description": r[2], "category": r[3]}
+        for r in rows
+    ]
+    return transactions
