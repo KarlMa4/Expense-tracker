@@ -11,6 +11,8 @@ import sqlite3
 import joblib
 from fastapi.middleware.cors import CORSMiddleware
 
+import db_setup
+
 # 初始化 FastAPI
 app = FastAPI(
     docs_url="/",       # Swagger UI 直接在 /
@@ -39,26 +41,9 @@ class TransactionIn(BaseModel):
     amount: float
     description: str
 
+
 # 建立資料表（如果還沒建）
-
-
-def init_db():
-    conn = sqlite3.connect("expenses.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS transactions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        date TEXT NOT NULL,
-        amount REAL NOT NULL,
-        description TEXT,
-        category TEXT
-    )
-    """)
-    conn.commit()
-    conn.close()
-
-
-init_db()
+db_setup.init_db()
 
 # 插入一筆交易
 
