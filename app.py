@@ -1,115 +1,168 @@
 # app.py
+# ------------------------------------------------------------
+# Before running:
+#   Windows: venv\Scripts\activate
+#   Mac:     source venv/bin/activate
+# Then run:  uvicorn app:app --reload
+# ------------------------------------------------------------
 
-# Before run change venv!!
-# Remember to move to 記帳app
-# terminal type: venv\Scripts\activate
-# Then run: uvicorn app:app --reload
-
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import sqlite3
 import joblib
-from fastapi.middleware.cors import CORSMiddleware
 
 import db_setup
 
-# 初始化 FastAPI
+# ============================================================
+# FastAPI Initialization
+# ============================================================
 app = FastAPI(
-    docs_url="/",       # Swagger UI 直接在 /
-    redoc_url=None,     # 可選：關掉 /redoc
+    docs_url="/",         # Swagger UI 直接在 /
+    redoc_url=None,       # 關掉 /redoc
     openapi_url="/openapi.json",
 )
 
-# CORS middleware（讓前端 HTML 可以呼叫 API）
+# Enable CORS (for frontend HTML/JS)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 開發時先允許全部
+    allow_origins=["*"],   # 開發時允許全部，之後可改成指定 domain
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 載入 ML 模型與向量器
+# ============================================================
+# Load ML Models
+# ============================================================
 clf = joblib.load("model.pkl")
 vectorizer = joblib.load("vectorizer.pkl")
 
-# 定義交易輸入資料格式
-
-
-class TransactionIn(BaseModel):
-    date: str
-    amount: float
-    description: str
-
-
-# 建立資料表（如果還沒建）
+# ============================================================
+# Database Setup
+# ============================================================
 db_setup.init_db()
 
-# 插入一筆交易
+DB_PATH = "expenses.db"
 
+def get_db_connection():
+    return sqlite3.connect(DB_PATH)
 
-def insert_transaction(date, amount, description, category):
-    conn = sqlite3.connect("expenses.db")
+def insert_transaction(date: str, amount: float, description: str, category: str):
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO transactions (date, amount, description, category) VALUES (?, ?, ?, ?)",
+        """
+        INSERT INTO transactions (date, amount, description, category)
+        VALUES (?, ?, ?, ?)
+        """,
         (date, amount, description, category)
     )
     conn.commit()
     conn.close()
 
-# Root endpoint
+# ============================================================
+# Pydantic Models
+# ============================================================
+class TransactionIn(BaseModel):
+    date: str
+    amount: float
+    description: str
 
+class TransactionUpdate(BaseModel):
+    category: str | None = None
 
+# ============================================================
+# Routes
+# ============================================================
+
+# Root
 @app.get("/")
 def root():
     return {"message": "Hello, FastAPI is working!"}
 
-# 新增交易
 
-
+# Add Transaction
 @app.post("/transactions")
 def add_transaction(t: TransactionIn):
-    # ML 預測類別
-    X = vectorizer.transform([t.description])
-    category = clf.predict(X)[0]
+    try:
+        # Predict category using ML
+        X = vectorizer.transform([t.description])
+        category = clf.predict(X)[0]
 
-    # 存到 DB
-    insert_transaction(t.date, t.amount, t.description, category)
+        # Save to DB
+        insert_transaction(t.date, t.amount, t.description, category)
 
-    return {
-        "date": t.date,
-        "amount": t.amount,
-        "description": t.description,
-        "predicted_category": category
-    }
+        return {
+            "date": t.date,
+            "amount": t.amount,
+            "description": t.description,
+            "predicted_category": category
+        }
+    except Exception as e:
+        print("Error in /transactions:", e)
+        return {"error": str(e)}
 
-# 回傳 summary (給 Chart.js 使用)
 
-
-@app.get("/summary")
-def get_summary():
-    conn = sqlite3.connect("expenses.db")
+# Get All Transactions
+@app.get("/transactions")
+def get_transactions():
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT category, SUM(amount) FROM transactions GROUP BY category")
+        "SELECT id, date, amount, description, category FROM transactions ORDER BY date ASC"
+    )
     rows = cursor.fetchall()
     conn.close()
+
+    return [
+        {"id": r[0], "date": r[1], "amount": r[2], "description": r[3], "category": r[4]}
+        for r in rows
+    ]
+
+
+# Update Transaction
+@app.patch("/transactions/{tx_id}")
+def update_transaction(tx_id: int, update: TransactionUpdate):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Check if exists
+    cursor.execute("SELECT id FROM transactions WHERE id = ?", (tx_id,))
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    # Apply update
+    if update.category:
+        cursor.execute(
+            "UPDATE transactions SET category = ? WHERE id = ?",
+            (update.category, tx_id),
+        )
+
+    conn.commit()
+    conn.close()
+    return {"message": "Transaction updated successfully", "id": tx_id}
+
+
+# Summary for charts
+@app.get("/summary")
+def get_summary():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT category, SUM(amount) FROM transactions GROUP BY category"
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
     return {row[0]: row[1] for row in rows}
 
 
-@app.get("/transactions")
-def get_transactions():
-    conn = sqlite3.connect("expenses.db")
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT date, amount, description, category FROM transactions ORDER BY date ASC")
-    rows = cursor.fetchall()
-    conn.close()
-
-    # 格式化成 JSON
-    transactions = [
-        {"date": r[0], "amount": r[1], "description": r[2], "category": r[3]}
-        for r in rows
-    ]
-    return transactions
+# List ML categories
+@app.get("/categories")
+def get_categories():
+    try:
+        return {"categories": clf.classes_.tolist()}
+    except Exception as e:
+        return {"error": str(e)}
