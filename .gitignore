@@ -4,3 +4,8 @@ db_test.py
 # Ignore model and vectorizer files
 model.pkl
 vectorizer.pkl
+
+__pycache__/
+*.pyc
+*.pkl
+*.db
